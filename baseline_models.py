@@ -16,6 +16,7 @@ import pandas as pd
 import numpy as np
 import re
 from nltk.util import ngrams
+from scipy.sparse import save_npz, load_npz
 
 
 GLOVE_PATH = '/home/student/pretrained_embds/glove.6B.50d.txt'
@@ -71,6 +72,7 @@ def n_gram(caption, n):
 
 
 def create_dataset(comp_path, context_anomaly_path, target_path):
+
     merged_df = load_comp_csv(comp_path)
     print(merged_df.columns)
     print(merged_df.head())
@@ -78,6 +80,8 @@ def create_dataset(comp_path, context_anomaly_path, target_path):
     merged_df['mask'] = merged_df['processed_captions'].apply(lambda x: 5 <= len(x.split()) <= 10)
     merged_df = merged_df[merged_df['mask']]
     print(merged_df.head())
+
+
 
 
     # computing the perplexity of the sentence
@@ -185,10 +189,17 @@ def create_dataset(comp_path, context_anomaly_path, target_path):
 
     # BOW features
 
-    bow_vectorizer = CountVectorizer()
+    bow_vectorizer = CountVectorizer(min_df=10)
     bow_vectors = bow_vectorizer.fit_transform(merged_df['processed_captions'].tolist())
 
-    print(bow_vectors)
+    save_npz('bow_features.npz', bow_vectors)
+    # bow_dim = len(bow_vectors.shape[0])
+    # bow_df = pd.DataFrame(bow_vectors, columns=[f'BOW_feature_{i}' for i in range(bow_dim)], dtype=float)
+    # merged_df[[f'BOW_feature_{i}' for i in range(bow_dim)]] = bow_df[[f'BOW_feature_{i}' for i in range(bow_dim)]]
+
+    print(merged_df.head())
+
+    # print(bow_vectors)
     # Word2Vec features
 
     glove_dict = load_glove_model(GLOVE_PATH)
@@ -217,8 +228,11 @@ def create_dataset(comp_path, context_anomaly_path, target_path):
         max_absolute_diff = max(abs(c - a) for c, a in zip(context_sim_lst, anomaly_sim_lst))
         average_absolute_diff = sum(abs(c - a) for c, a in zip(context_sim_lst, anomaly_sim_lst))/len(joke_set)
 
-        sim_features_lst.append((context_sim, anomaly_sim, max_absolute_diff, average_absolute_diff))
-
+        sim_features_lst.append([context_sim, anomaly_sim, max_absolute_diff, average_absolute_diff])
+    sim_names = ['context_sim', 'anomaly_sim', 'max_absolute_diff', 'average_absolute_diff']
+    sim_features_df = pd.DataFrame(sim_features_lst, columns=sim_names, dtype=float)
+    merged_df[sim_names] = sim_features_df[sim_names]
+    print(merged_df.head())
     merged_df.to_csv(target_path, index=False, header=False)
 
 
