@@ -5,6 +5,7 @@ from pytorch_pretrained_bert import OpenAIGPTTokenizer, OpenAIGPTModel, OpenAIGP
 import torch
 from nltk.sentiment import SentimentIntensityAnalyzer
 from textstat import flesch_reading_ease, automated_readability_index
+from nltk.stem.snowball import SnowballStemmer
 from nltk.lm.preprocessing import pad_both_ends, flatten, pad_sequence
 from nltk.lm import Vocabulary
 from nltk.corpus import brown
@@ -17,7 +18,7 @@ import numpy as np
 import re
 from nltk.util import ngrams
 from scipy.sparse import save_npz, load_npz
-
+from tqdm import tqdm
 
 GLOVE_PATH = '/home/student/pretrained_embds/glove.6B.50d.txt'
 
@@ -185,19 +186,11 @@ def create_dataset(comp_path, context_anomaly_path, target_path):
     print(merged_df.head())
 
 
-
-
-    # BOW features
-
-    bow_vectorizer = CountVectorizer(min_df=10)
-    bow_vectors = bow_vectorizer.fit_transform(merged_df['processed_captions'].tolist())
-
-    save_npz('bow_features.npz', bow_vectors)
     # bow_dim = len(bow_vectors.shape[0])
     # bow_df = pd.DataFrame(bow_vectors, columns=[f'BOW_feature_{i}' for i in range(bow_dim)], dtype=float)
     # merged_df[[f'BOW_feature_{i}' for i in range(bow_dim)]] = bow_df[[f'BOW_feature_{i}' for i in range(bow_dim)]]
 
-    print(merged_df.head())
+    # print(merged_df.head())
 
     # print(bow_vectors)
     # Word2Vec features
@@ -208,9 +201,16 @@ def create_dataset(comp_path, context_anomaly_path, target_path):
 
     merged_df = merged_df.merge(anomaly_context_df, how='inner', on='contest')
 
-    merged_df['context_words_list'] = merged_df[['context_word_1', 'context_word_2', 'context_word_3']].tolist()
+    # BOW features
 
-    merged_df['anomaly_words_list'] = merged_df[['anomaly_word_1', 'anomaly_word_2', 'anomaly_word_3']].tolist()
+    bow_vectorizer = CountVectorizer(min_df=10)
+    bow_vectors = bow_vectorizer.fit_transform(merged_df['processed_captions'].tolist())
+
+    save_npz('bow_features.npz', bow_vectors)
+
+    merged_df['context_words_list'] = merged_df[['context_word_1', 'context_word_2', 'context_word_3']].values.tolist()
+
+    merged_df['anomaly_words_list'] = merged_df[['anomaly_word_1', 'anomaly_word_2', 'anomaly_word_3']].values.tolist()
 
     joke_words_list = merged_df['processed_captions'].apply(lambda x: x.split()).tolist()
     anomaly_words_list = merged_df['anomaly_words_list'].tolist()
@@ -218,10 +218,72 @@ def create_dataset(comp_path, context_anomaly_path, target_path):
 
     sim_features_lst = []
 
-    for joke_set, context_set, anomaly_set in zip(joke_words_list, context_words_list, anomaly_words_list):
-        context_sim_lst = [max(cosine_sim(glove_dict[j], glove_dict[c]) for c in context_set if c) for j in joke_set]
-        anomaly_sim_lst = [max(cosine_sim(glove_dict[j], glove_dict[a]) for a in anomaly_set if a) for j in joke_set]
+    cosine_dict = {}
 
+    snow_stemmer = SnowballStemmer(language='english')
+
+    for joke_set, context_set, anomaly_set in tqdm(zip(joke_words_list, context_words_list, anomaly_words_list), total=len(joke_words_list)):
+        context_sim_lst = []
+        anomaly_sim_lst = []
+        for j in joke_set:
+            max_cosine_context = 0
+            for c in context_set:
+                if c:
+
+                    if (j, c) in cosine_dict:
+                        max_cosine_context = max(max_cosine_context, cosine_dict[(j, c)])
+                    elif (c, j) in cosine_dict:
+                        max_cosine_context = max(max_cosine_context, cosine_dict[(c, j)])
+                    else:
+                        if j not in glove_dict:
+                            stemmed_j = snow_stemmer.stem(str(j))
+                            if stemmed_j not in glove_dict:
+                                stemmed_j = 'unknown'
+                        else:
+                            stemmed_j = j
+                        if c not in glove_dict:
+                            stemmed_c = snow_stemmer.stem(str(c))
+                            if stemmed_c not in glove_dict:
+                                stemmed_c = 'unknown'
+                        else:
+                            stemmed_c = c
+
+                        cur_cos_dist = cosine_sim(glove_dict[stemmed_j], glove_dict[stemmed_c])
+                        cosine_dict[(j, c)] = cur_cos_dist
+                        max_cosine_context = max(max_cosine_context, cur_cos_dist)
+
+            context_sim_lst.append(max_cosine_context)
+
+            max_cosine_anomaly = 0
+            for a in anomaly_set:
+                if a:
+                    if (j, a) in cosine_dict:
+                        max_cosine_anomaly = max(max_cosine_anomaly, cosine_dict[(j, a)])
+                    elif (a, j) in cosine_dict:
+                        max_cosine_anomaly = max(max_cosine_anomaly, cosine_dict[(a, j)])
+                    else:
+                        if j not in glove_dict:
+                            stemmed_j = snow_stemmer.stem(str(j))
+                            if stemmed_j not in glove_dict:
+                                stemmed_j = 'unknown'
+                        else:
+                            stemmed_j = j
+                        if a not in glove_dict:
+                            stemmed_a = snow_stemmer.stem(str(a))
+                            if stemmed_a not in glove_dict:
+                                stemmed_a = 'unknown'
+                        else:
+                            stemmed_a = a
+
+                        cur_cos_dist = cosine_sim(glove_dict[stemmed_j], glove_dict[stemmed_a])
+                        cosine_dict[(j, a)] = cur_cos_dist
+                        max_cosine_anomaly = max(max_cosine_anomaly, cur_cos_dist)
+
+            anomaly_sim_lst.append(max_cosine_anomaly)
+
+        # context_sim_lst = [max(cosine_sim(glove_dict[j], glove_dict[c]) for c in context_set if c) for j in joke_set]
+        # anomaly_sim_lst = [max(cosine_sim(glove_dict[j], glove_dict[a]) for a in anomaly_set if a) for j in joke_set]
+        #
         context_sim = max(context_sim_lst)
         anomaly_sim = max(anomaly_sim_lst)
 
@@ -233,7 +295,7 @@ def create_dataset(comp_path, context_anomaly_path, target_path):
     sim_features_df = pd.DataFrame(sim_features_lst, columns=sim_names, dtype=float)
     merged_df[sim_names] = sim_features_df[sim_names]
     print(merged_df.head())
-    merged_df.to_csv(target_path, index=False, header=False)
+    merged_df.to_csv(target_path, index=False, header=True)
 
 
 if __name__ == '__main__':
