@@ -75,6 +75,20 @@ def n_gram(caption, n):
     list(ngrams(padded_sent, n=3))
 
 
+def set_sim_features(glove_dict, context_set, anomaly_set, joke_set):
+    context_sim_lst = [max(cosine_sim(glove_dict[j], glove_dict[c]) for c in context_set if not pd.isna(c))
+                       for j in joke_set if j in glove_dict]
+    anomaly_sim_lst = [max(cosine_sim(glove_dict[j], glove_dict[a])
+                           for a in anomaly_set if not pd.isna(a)) for j in joke_set if j in glove_dict]
+
+    context_sim = max(context_sim_lst) if context_sim_lst else 0
+    anomaly_sim = max(anomaly_sim_lst) if anomaly_sim_lst else 0
+
+    max_absolute_diff = max(abs(c - a) for c, a in zip(context_sim_lst, anomaly_sim_lst)) if context_sim and anomaly_sim else 0
+    average_absolute_diff = sum(abs(c - a) for c, a in zip(context_sim_lst, anomaly_sim_lst) )/len(joke_set) if context_sim and anomaly_sim else 0
+
+    return [context_sim, anomaly_sim, max_absolute_diff, average_absolute_diff]
+
 
 #%%
 comp_path = '/home/student/Desktop/caption-contest-data/contests/summaries'
@@ -224,25 +238,30 @@ merged_df_cop['context_words_list'] = merged_df_cop[context_cols].values.tolist(
 anomaly_cols = ['anomaly_word_1', 'anomaly_word_2', 'anomaly_word_3']
 merged_df_cop['anomaly_words_list'] = merged_df_cop[anomaly_cols].values.tolist()
 
+#%%
 joke_words_list = merged_df_cop['processed_captions'].apply(lambda x: x.split()).tolist()
 anomaly_words_list = merged_df_cop['anomaly_words_list'].tolist()
 context_words_list = merged_df_cop['context_words_list'].tolist()
 
 sim_features_lst = []
 #%%
-for joke_set, context_set, anomaly_set in zip(joke_words_list, context_words_list, anomaly_words_list):
-    context_sim_lst = [max(cosine_sim(glove_dict[j], glove_dict[c]) for c in context_set if not pd.isna(c))
-                       for j in joke_set if j in glove_dict]
-    anomaly_sim_lst = [max(cosine_sim(glove_dict[j], glove_dict[a])
-                           for a in anomaly_set if not pd.isna(a)) for j in joke_set if j in glove_dict]
-
-    context_sim = max(context_sim_lst)
-    anomaly_sim = max(anomaly_sim_lst)
-
-    max_absolute_diff = max(abs(c - a) for c, a in zip(context_sim_lst, anomaly_sim_lst))
-    average_absolute_diff = sum(abs(c - a) for c, a in zip(context_sim_lst, anomaly_sim_lst))/len(joke_set)
-
-    sim_features_lst.append([context_sim, anomaly_sim, max_absolute_diff, average_absolute_diff])
+# for joke_set, context_set, anomaly_set in zip(joke_words_list, context_words_list, anomaly_words_list):
+#     context_sim_lst = [max(cosine_sim(glove_dict[j], glove_dict[c]) for c in context_set if not pd.isna(c))
+#                        for j in joke_set if j in glove_dict]
+#     anomaly_sim_lst = [max(cosine_sim(glove_dict[j], glove_dict[a])
+#                            for a in anomaly_set if not pd.isna(a)) for j in joke_set if j in glove_dict]
+#
+#     context_sim = max(context_sim_lst)
+#     anomaly_sim = max(anomaly_sim_lst)
+#
+#     max_absolute_diff = max(abs(c - a) for c, a in zip(context_sim_lst, anomaly_sim_lst))
+#     average_absolute_diff = sum(abs(c - a) for c, a in zip(context_sim_lst, anomaly_sim_lst))/len(joke_set)
+#
+#     sim_features_lst.append([context_sim, anomaly_sim, max_absolute_diff, average_absolute_diff])
+merged_df_cop['sim_features'] = \
+    merged_df_cop[['context_words_list', 'anomaly_words_list', 'processed_captions']]\
+        .apply(lambda x: set_sim_features(glove_dict, x['context_words_list'], x['anomaly_words_list'], x['processed_captions'].split()),axis=1)
+#%%
 sim_names = ['context_sim', 'anomaly_sim', 'max_absolute_diff', 'average_absolute_diff']
 sim_features_df = pd.DataFrame(sim_features_lst, columns=sim_names, dtype=float)
 merged_df_cop[sim_names] = sim_features_df[sim_names]

@@ -18,9 +18,30 @@ def create_bert_train_test_datasets(data_path, train_target_path, test_target_pa
 
     dataset = pd.read_csv(data_path)[['contest', 'caption', 'score', 'context_words_list', 'anomaly_words_list']]
 
-    dataset = dataset[dataset['contest'].isin(contests)].reset_index()
+    dataset = dataset[dataset['contest'].isin(contests)] # .reset_index()
 
-    # self.__snow_stemmer = SnowballStemmer(language='english')
+    dataset['top_ten_rank'] = 0
+
+    contests_count = {}
+    # for contest in contests:
+    #     ten_values = dataset[dataset['contest']][]
+    top_ten_rank = list(dataset["top_ten_rank"])
+    for i in range(len(dataset)):
+        if dataset['contest'].iloc[i] in contests_count:
+            if contests_count[dataset.iloc[i]['contest']] < 10:
+                contests_count[dataset.iloc[i]['contest']] += 1
+                # dataset.iloc[i]['top_ten_rank'] = 1
+                top_ten_rank[i] = 1
+                x = 5
+                y = 3
+        else:
+            contests_count[dataset.iloc[i]['contest']] = 1
+            # dataset.iloc[i]['top_ten_rank'] = 1
+            top_ten_rank[i] = 1
+    dataset["top_ten_rank"] = top_ten_rank
+    x = 5
+
+        # self.__snow_stemmer = SnowballStemmer(language='english')
 
     dataset['caption'] = dataset['caption'].apply(lambda x: preprocess(x))
 
@@ -32,8 +53,8 @@ def create_bert_train_test_datasets(data_path, train_target_path, test_target_pa
     train_dataset = dataset[dataset['contest'].isin(train_contests)]
     test_dataset = dataset[dataset['contest'].isin(test_contests)]
 
-    train_dataset.to_csv(train_target_path)
-    test_dataset.to_csv(test_target_path)
+    train_dataset.to_csv(train_target_path, index=False)
+    test_dataset.to_csv(test_target_path, index=False)
 
 
 def preprocess(x):
@@ -53,7 +74,8 @@ class BertDataset(torch.utils.data.Dataset):
         self.contests = list(set(self.__dataset['contest'].values))
 
     def __getitem__(self, idx):
-        return self.__dataset.iloc[idx]['caption'], self.__dataset.iloc[idx]['score']
+        return self.__dataset.iloc[idx]['caption'], self.__dataset.iloc[idx]['score'], \
+               self.__dataset.iloc[idx]['top_ten_rank'], self.__dataset.iloc[idx]['contest']
 
     def __len__(self):
         return len(self.__dataset)
