@@ -1,6 +1,6 @@
 import pandas as pd
-
-from bert_classifier import BertHumorNetwork
+import pickle as pkl
+from bert_classifier import MixedBertHumorNetwork
 import bert_dataset
 import torch
 from torch.nn import MSELoss
@@ -13,13 +13,13 @@ from tqdm import tqdm
 def main():
     epochs = 100
     batch_size = 64
-    train_dataset_path = 'train_bert_data.csv'
-    test_dataset_path = 'test_bert_data.csv'
+    train_dataset_path = 'train_mixed_data.csv'
+    test_dataset_path = 'test_mixed_data.csv'
 
     last = 'last_weight.pt'
 
-    train_dataset = bert_dataset.BertDataset(train_dataset_path)
-    test_dataset = bert_dataset.BertDataset(test_dataset_path)
+    train_dataset = bert_dataset.MixedBertDataset(train_dataset_path)
+    test_dataset = bert_dataset.MixedBertDataset(test_dataset_path)
 
     train_contests = train_dataset.contests
     test_contests = test_dataset.contests
@@ -30,8 +30,8 @@ def main():
     device = torch.device("cuda:0")
 
     tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
-    model = BertHumorNetwork()  # You can pass the parameters if required to have more flexible model
-    model.to(device)  ## can be gpu
+    model = MixedBertHumorNetwork()  # You can pass the parameters if required to have more flexible model
+    model.to(device)  ##  can be gpu
     criterion = MSELoss()  ## If required define your own criterion
     optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=0.001)
 
@@ -39,9 +39,13 @@ def main():
     test_map_lst = []
 
     for epoch in range(epochs):
+        total_loss = 0
         for batch in train_dataloader:  ## If you have a DataLoader()  object to get the data.
             # print(batch)
             data = list(batch[0])
+
+            baseline_vec = batch[4].to(device).float()
+
             targets = batch[1].to(device).float() ## assuming that data loader returns a tuple of data and its targets
 
             optimizer.zero_grad()
@@ -51,11 +55,14 @@ def main():
             attention_mask = encoding['attention_mask'].to(device)
             # print(input_ids)
             # print(attention_mask)
-            outputs = model(input_ids, attention_mask)
+            outputs = model(input_ids, attention_mask, baseline_vec)
 
             loss = criterion(outputs, targets)
+            total_loss += loss
             loss.backward()
             optimizer.step()
+
+        print(f'loss: {total_loss}')
 
         print("evaluating mAP for train set")
 
@@ -68,12 +75,13 @@ def main():
             targets = batch[1]   # assuming that data loader returns a tuple of data and its targets
             top_ten_rank = batch[2].tolist()
             b_contests = batch[3].tolist()
+            baseline_vec = batch[4].to(device).float()
 
             encoding = tokenizer.batch_encode_plus(data, return_tensors='pt', padding=True, truncation=True,
                                                    max_length=50, add_special_tokens=True)
             input_ids = encoding['input_ids'].to(device)
             attention_mask = encoding['attention_mask'].to(device)
-            outputs = model(input_ids, attention_mask).tolist()
+            outputs = model(input_ids, attention_mask, baseline_vec).tolist()
 
             train_true_label_list += top_ten_rank
             train_pred_list += outputs
@@ -101,12 +109,13 @@ def main():
             targets = batch[1]  ## assuming that data loader returns a tuple of data and its targets
             top_ten_rank = batch[2].tolist()
             b_contests = batch[3].tolist()
+            baseline_vec = batch[4].to(device).float()
 
             encoding = tokenizer.batch_encode_plus(data, return_tensors='pt', padding=True, truncation=True,
                                                    max_length=50, add_special_tokens=True)
             input_ids = encoding['input_ids'].to(device)
             attention_mask = encoding['attention_mask'].to(device)
-            outputs = model(input_ids, attention_mask).tolist()
+            outputs = model(input_ids, attention_mask, baseline_vec).tolist()
 
             test_true_label_list += top_ten_rank
             test_pred_list += outputs
@@ -138,14 +147,20 @@ def main():
     plt.title('train mAP')
     plt.ylabel('mAP')
     plt.xlabel('epoch')
-    plt.savefig('train_map.png')
+    plt.savefig('train_mixed_map.png')
 
     plt.figure()
     plt.plot([i for i in range(1, epochs + 1)], test_map_lst)
     plt.title('test mAP')
     plt.ylabel('mAP')
     plt.xlabel('epoch')
-    plt.savefig('test_map.png')
+    plt.savefig('test_mixed_map.png')
+
+    with open('train_map_list_mixed.pkl', 'wb') as f:
+        pkl.dump(train_map_lst, f)
+
+    with open('test_map_list_mixed.pkl', 'wb') as f:
+        pkl.dump(test_map_lst, f)
 
 
 
